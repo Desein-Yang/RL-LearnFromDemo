@@ -7,14 +7,14 @@ import numpy as np
 import torch
 import time
 import copy
-import torch.optim
-# import tensorflow as tf
+import math
 from nn_builder.pytorch.NN import NN
-# from tensorboardX import SummaryWriter
 import torch.optim as optim
 from torch import nn
 from torch.distributions import Categorical,Normal
+import torch.nn.functional as F
 from env import wrap
+from collections import deque
 
 class Base_Agent(object):
 
@@ -375,7 +375,7 @@ class Base_Agent(object):
         for to_model, from_model in zip(to_model.parameters(), from_model.parameters()):
             to_model.data.copy_(from_model.data.clone())
 
-class PPO(Base_Agent):
+class PPO1(Base_Agent):
     """Proximal Policy Optimization agent"""
     agent_name = "PPO"
 
@@ -497,33 +497,44 @@ class PPO(Base_Agent):
 class Buffer():
     def __init__(self):
         self.actions = []
-        self.states = []
+        self.obs = []
         self.rewards = []
         self.dones = []
         self.log_probs = []
-        self.state_value = []
+        self.size = len(self.rewards)
+        self.is_trains = []
+        self.infos = []
     
     def clear(self):
-        self.actions, self.obs, self.rewards, self.dones,self.log_probs,self.state_value = [],[],[],[],[],[]
+        self.actions, self.obs, self.rewards, self.dones,self.log_probs,self.infos, self.is_trains = [],[],[],[],[],[],[]
         
-    def add(self,action,ob,reward,done,ac_log_prob):
+    def add(self,action,ob,reward,done,info,is_train,ac_log_prob):
         self.actions.append(action)
         self.log_probs.append(ac_log_prob)
-        self.state.append(ob)
-        self.done.append(done)
+        self.obs.append(ob)
+        self.dones.append(done)
+        self.is_trains.append(is_train)
         self.rewards.append(reward)
+        self.infos.append(info)
+
+    def reward_scale(self):
+        r = self.rewards
+        self.rewards = (r - r.mean()) / (r.std() + 1e-8)
+
+    def get_size(self):
+        assert len(self.rewards) == len(self.actions)
+        return self.size
 
 class PPO(object):
-    def __init__(self,env,seed):
+    def __init__(self,env,seed,ARGS):
         self.env = wrap(env)
-        ob_space = self.env.observation_space
-        ac_space = self.env.action_space
+        # ob_space = self.env.observation_space
+        # ac_space = self.env.action_space
 
-        self.actor_model = self.build_actor_model()
-    
-        self.optimizer = optim.Adam(self.actor_model.parameters())
-
-        self.critic_model = self.build_critic_model()
+        # ARGS.action_n = self.env.action_space.n
+        self.actor_model_old = self.build_actor_model(ARGS.action_n)
+        self.critic_model_old = self.build_critic_model()
+        self.reset_point = ARGS.T
         self.timelimit = 100000
         self.gamma = 0.99
         self.eps = 1e-8
@@ -538,7 +549,6 @@ class PPO(object):
             state_value = buffer.state_value[i]
             adv.append(reward - state_value)
         return adv
-
 
     def get_critic_value(self,ob):
         ob = torch.from_numpy(ob) # ob is a numpy array
@@ -579,8 +589,12 @@ class PPO(object):
         
         return ep_r, frame_count, model
 
-    def build_actor_model(self,input_dim,action_dim):
+    def build_actor_model(self,action_dim):
+        input_dim = ARGS.FRAME_SKIP
         return MLPModel(input_dim,action_dim,True)
+    def build_critic_model(self):
+        input_dim = ARGS.FRAME_SKIP
+        return MLPModel(input_dim,1,False)
 
     def get_value(self,obs):
         action_probs = self.action_layer(state)
@@ -589,17 +603,13 @@ class PPO(object):
         action_logprobs = dist.log_prob(action)
         dist_entropy = dist.entropy()
 
-    def build_critic_model(self,input_dim):
-        return MLPModel(input_dim,1,False)
-
     def get_action(self,ob):
         ob = torch.from_numpy(ob) # ob is a numpy array
-        action_prob = self.model(ob)
+        action_prob = self.actor_model_old(ob)
         # dist = Categorical(action_prob)
         dist = Normal(action_prob)
         action = dist.sample()
         ac_log_prob = dist.log_prob(action)
-
         return action,ac_log_prob
 
     def get_discounted_reward(self,buffer,norm=True):
@@ -629,35 +639,52 @@ class PPO(object):
         if hasattr(gym.spaces, 'prng'):
             gym.spaces.prng.seed(random_seed)
 
-    def update(self):
-        for name,params in self.actor_model.named_parameters():
-            params.data = 
+    def update(self,actor_model,critic_model,reset_point):
+        self.actor_model_old.load_state_dict(actor_model)
+        self.critic_model_old.load_state_dict(critic_model)
+        self.reset_point = reset_point
+
+    def rollout(self,demo,ARGS):
+        """Rollout worker for evaluation and return batch D and success times W"""
+        # TODO: reset to state function
+        # get action()
+        # replay demo()
+        L = ARGS.batch_rollout_size
+        K = ARGS.rnn_memory_size
+        d = ARGS.nums_start_point
+        W = 0 # success rate W 
+        D = Buffer()
+
+        reset_point = self.reset_point
+        start_point = np.random.uniform(reset_point - d,reset_point) # start = tao * reset = tao
+        self.env.reset_to_state(reset_point)
+        i = start_point - K
+
+        for step in range(L):
+            if i > start_point:
+                # sample action
+                action, ac_log_prob = self.get_action(ob)
+                ob, reward, done, info = self.env.step(action)
+                is_train = True
+            else:
+                action, ac_log_prob, ob, reward, done, info = demo.replay(i)
+                is_train = False
+            D.add(action,ob,reward,done,info,is_train,ac_log_prob)
+            i = i + 1
+
+            if done:
+                if sum(D.rewards[reset_point:]) > sum(demo.rewards[reset_point:]):
+                    W = W + 1
+                start_point = np.random.uniform(reset_point-d,reset_point)
+                i = start_point - K
+                self.env.reset_to_state(reset_point)      
+        
+        return D,W
 
 
-
-
-def run(args):
+def optimize(self,actor_model,critic_model,D):
     
-    # env 
-    env = gym.make('CartPole-v0')
-    env.seed(args.seed)
-    torch.manual_seed(args.seed)
-
-    # model
-    ppo = PPO(env,args.seed)
-
-    for g in range(args.generation):
-
-
-
-
-import numpy as np
-import math
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from vbn import VirtualBatchNorm2D, VirtualBatchNorm1D
-from collections import deque
+    pass
 
 class CNNModel(nn.Module):
     """
