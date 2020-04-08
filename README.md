@@ -19,6 +19,6 @@ Demo (dict)
 -   checkpoint_action_nr
 
 ## Update log
-1. First version: 
+1. 写好了replay demo 和reset env相关的类
 
 ## Reference
