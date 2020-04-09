@@ -8,40 +8,14 @@ import torch
 import time
 import copy
 import math
-from nn_builder.pytorch.NN import NN
+# from nn_builder.pytorch.NN import NN
+from model import CNNModel,MLPModel
 from torch.optim import SGD
 from torch import nn
 from torch.distributions import Categorical,Normal
 import torch.nn.functional as F
-from env import wrap
 from collections import deque
-
-class Buffer():
-    def __init__(self):
-        self.actions = []
-        self.obs = []
-        self.rewards = []
-        self.dones = []
-        self.size = len(self.rewards)
-        self.is_trains = []
-        self.infos = []
-        self.state_value = []
-        self.discount_r = []
-    
-    def clear(self):
-        self.actions, self.obs, self.rewards, self.dones,self.infos, self.is_trains, self.state_value, self.discount_r = [],[],[],[],[],[],[],[]
-        
-    def add(self,action,ob,reward,done,info,is_train):
-        self.actions.append(action)
-        self.obs.append(ob)
-        self.dones.append(done)
-        self.is_trains.append(is_train)
-        self.rewards.append(reward)
-        self.infos.append(info)
-
-    def get_size(self):
-        assert len(self.rewards) == len(self.actions)
-        return self.size
+from loaddemo import Buffer
 
 class Worker(object):
     """worker for rollout in enviroment"""
@@ -131,6 +105,7 @@ class PPO_Optimizer(object):
         self.w_vf = ARGS.weight_vf
         self.w_ent = ARGS.weight_entropy
         self.gamma = ARGS.gamma
+        self._max_grad_norm = ARGS.max_grad_norm
 
         self.actor_old = MLPModel(ARGS.FRAME_SKIP,ARGS.action_n,True)
         self.critic_old = MLPModel(ARGS.FRAME_SKIP,1,False)
@@ -150,7 +125,7 @@ class PPO_Optimizer(object):
                 buffer.state_value.append(self.critic_old(torch.from_numpy(ob)))
             else:
                 raise OSError        
-        assert len(buffer.log_prob) == len(discount_r)
+        assert len(buffer.log_prob) == len(buffer.discount_r)
         for state_value,d_reward in zip(buffer.state_value,buffer.discount_r):
             adv.append(d_reward - state_value)
         return adv
@@ -176,8 +151,9 @@ class PPO_Optimizer(object):
         self.actor.load_state_dict(actor_model.state_dict())
         self.critic.load_state_dict(critic_model.state_dict()) 
         
+        self.get_discounted_reward(D)
         adv = self.get_advantage_est(D)
-        action = torch.tensor(D.action)
+        action = torch.Tensor(D.action)
         for idx in range(D.size):
             ob = torch.from_numpy(D.obs[idx])
             dist = Categorical(self.actor(ob))
@@ -193,7 +169,7 @@ class PPO_Optimizer(object):
             vf_losses.append(vf_loss.numpy())
 
             ent_loss = dist.entropy().mean()
-            ent_losses.append(e_loss.numpy())
+            ent_losses.append(ent_loss.numpy())
 
             loss = clip_loss + self.w_vf * vf_loss + self.w_ent * ent_loss
             losses.append(loss.numpy())
@@ -216,99 +192,3 @@ class PPO_Optimizer(object):
             'Ent loss' : ent_losses,
         }
         return lossdict, self.actor.state_dict(), self.critic.state_dict()
-
-class CNNModel(nn.Module):
-    """
-    TODO:Network module for PPO.
-    """
-    def __init__(self, input_dim,action_dim,is_actor):
-        super(CNNModel, self).__init__()
-        self.conv1 = nn.Conv2d(kernel_size = 8,stride=4)
-        
-        self.actor = is_actor
-        self.set_parameter_no_grad()
-        self._ortho_ini()
-        # self.previous_frame should be PILImage
-        self.previous_frame = None
-
-    def forward(self, x):
-        x = F.tanh(self.fc1(x))
-        x = F.tanh(self.fc2(x))
-        x = self.fc3(x)
-        if is_actor:
-            return F.softmax(x)
-        else:
-            return x
-
-    def _ortho_ini(self):
-        for m in self.modules():
-            # Orthogonal initialization and layer scaling
-            # Paper name : Implementation Matters in Deep Policy Gradient: A case study on PPO and TRPO
-            if isinstance(m,(nn.Linear,nn.Conv2d)):
-                nn.init.orthogonal_(m.weight)
-                if m.bias is not None:
-                    m.bias.data.zero_()
-
-    def set_parameter_no_grad(self):
-        for param in self.parameters():
-            param.requires_grad = False
-
-    def get_size(self):
-        """
-        Returns:   
-            Number of all params
-        """
-        count = 0
-        for params in self.parameters():
-            count += params.numel()
-        return count
-
-class MLPModel(nn.Module):
-    """
-    Network module for PPO.
-    """
-    def __init__(self, input_dim,action_dim,is_actor):
-        super(MLPModel, self).__init__()
-        n_latent_var = 64
-        self.fc1 = nn.Linear(input_dim, n_latent_var)
-        self.fc2 = nn.Linear(n_latent_var, n_latent_var)
-        self.fc3 = nn.Linear(n_latent_var, action_dim)
-        
-        self.actor = is_actor
-        self.set_parameter_no_grad()
-        self._ortho_ini()
-        # self.previous_frame should be PILImage
-        self.previous_frame = None
-
-    def forward(self, x):
-        x = F.tanh(self.fc1(x))
-        x = F.tanh(self.fc2(x))
-        x = self.fc3(x)
-        if is_actor:
-            return F.softmax(x)
-        else:
-            return x
-
-    def _ortho_ini(self):
-        for m in self.modules():
-            # Orthogonal initialization and layer scaling
-            # Paper name : Implementation Matters in Deep Policy Gradient: A case study on PPO and TRPO
-            if isinstance(m,(nn.Linear,nn.Conv2d)):
-                nn.init.orthogonal_(m.weight)
-                if m.bias is not None:
-                    m.bias.data.zero_()
-
-    def set_parameter_no_grad(self):
-        for param in self.parameters():
-            param.requires_grad = False
-
-    def get_size(self):
-        """
-        Returns:   
-            Number of all params
-        """
-        count = 0
-        for params in self.parameters():
-            count += params.numel()
-        return count
-

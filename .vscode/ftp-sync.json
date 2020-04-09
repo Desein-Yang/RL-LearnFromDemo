@@ -1,0 +1,27 @@
+{
+    "remotePath": "./LearnDemo",
+    "host": "10.20.121.197",
+    "username": "yangqi",
+    "password": "yangqi0416",
+    "port": 22,
+    "secure": false,
+    "protocol": "ftp",
+    "uploadOnSave": false,
+    "passive": false,
+    "debug": false,
+    "privateKeyPath": null,
+    "passphrase": null,
+    "agent": null,
+    "allow": [],
+    "ignore": [
+        "\\.vscode",
+        "\\.git",
+        "\\.DS_Store"
+    ],
+    "generatedFiles": {
+        "extensionsToInclude": [
+            ""
+        ],
+        "path": ""
+    }
+}

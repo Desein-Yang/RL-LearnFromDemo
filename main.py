@@ -1,8 +1,10 @@
-
+import logging
+import os
 import torch.multiprocessing as mp
-from src.env import make_env
-from src.agent import PPO
-from src.loaddemo import Demo
+from src.env import make_atari_env,ReplayResetEnv
+from src.agent import Worker,PPO_Optimizer
+from src.loaddemo import Demo,Buffer
+from src.utils import mk_folder,setup_logging
 
 class ARGS:
     gamename = 'AlienDeterministic'
@@ -11,12 +13,13 @@ class ARGS:
     rho = 0.1 # success threhold rho
     T = 1024 # demostration length T
     algorithm = "PPO" # laerning algorithm
+    logger = None
 
     eps = 0.2 # PPO eps
     lr = 0.1 # PPO learning rate
     
     ncpu = 1
-    timestep_limit = 10
+    timestep_limit = 1000000
     action_n = 0
     
     # fixed
@@ -26,37 +29,69 @@ class ARGS:
     epsilon = 1e-8
     allowed_lag = 50
     allowed_score_deficit = 0
+    max_grad_norm = 1
 
-    @staticmethod
-    def set_params(kwargs):
-        ARGS.gamename = kwargs.game+'Deterministic'
-        ARGS.M = kwargs.worker_num
-        ARGS.delta = kwargs.shift_size
-        ARGS.rho = kwargs.success_threhold
-        ARGS.T = kwargs.demo_len
-        ARGS.ncpu = kwargs.ncpu
+    @classmethod
+    def set_params(cls,kwargs):
+        cls.gamename = kwargs.game+'Deterministic'
+        cls.M = kwargs.worker_num
+        cls.delta = kwargs.shift_size
+        cls.rho = kwargs.success_threhold
+        cls.T = kwargs.demo_len
+        cls.ncpu = kwargs.ncpu
+    
+    @classmethod
+    def set_logger(cls, logger):
+        cls.logger = logger
 
-    @staticmethod
-    def set_env(kwargs,env):
-        ARGS.action_n = env.action_space.n
+    @classmethod
+    def set_folder_path(cls,folder_path):
+        cls.folder_path = folder_path
 
-def main(kwargs):
+    @classmethod
+    def set_env(cls,env):
+        cls.action_n = env.action_space.n
+    
+    @classmethod
+    def output(cls):
+        logger = cls.logger
+        logger.info("Game:%s" % cls.gamename)
+        logger.info("Worker number%s" % cls.M)
+        # logger.info("")
+
+def main(kwargs,ARGS):
 
     # TODO:Initilization:
     # 1. multiprocess setting
     pool = mp.Pool(ARGS.ncpu)
+
     # 2. env setting
-    env_list = make_env(ARGS.gamename,ARGS.worker_num)
+    env_list = make_atari_env(ARGS.gamename,ARGS.M,ARGS.seed)
+    
     # 3. load demo
     demo = Demo("./demos/Pitfall.demo")
+    
     # 4. model setting
     # 5. runner setting
     # 6. gpu config
+    # 7. args setting
     ARGS = ARGS()
     ARGS.set_params(kwargs)
-    workers = [PPO(env_list[rank],ARGS.seed+rank,ARGS) for rank in range(ARGS.M)]
+    folderpath = mk_folder(os.getcwd(),ARGS)
+    ARGS.set_folder_path(folderpath)
+    print("start!")
+    print("-----------------------------------------")
 
-    
+    logger = logging.getLogger(__name__)
+    filename = ARGS.kwargs.game+'-'+'M'+'-'+ARGS.M+'-'+'delta'+'-'+ARGS.delta+'-'+'rho'+ARGS.rho+'.txt'
+    logger = setup_logging(logger,folderpath,filename)
+    ARGS.set_logger(logger)
+    logger.info("Log initialized")
+
+    workers = [Worker(env_list[rank],ARGS) for rank in range(ARGS.M)]
+    optimizer = PPO_Optimizer(ARGS)
+    logger.info("Generate %d worker and optimizer" % ARGS.M)
+
     D = []
     W = []
     reset_point = ARGS.T
@@ -88,12 +123,13 @@ def main(kwargs):
         if sum(W) / sum(demo) >= ARGS.rho:
             reset_point = reset_point - ARGS.delta
         
+        w = workers[0]
+        actor_model,critic_model = optimizer.optimize(w.actor_model,w.critic_model,D)
         for w in workers:
-            actor_model,critic_model = optimize(w.actor_model,w.critic_model,D)
             w.update(actor_model,critic_model,reset_point)
-
+            
+            
         # TODO:output log info(rank == 0)
-
 
 def args_parser():
     import argparse
@@ -108,3 +144,10 @@ def args_parser():
     
     args=parser.parse_args()
     return args
+
+if __name__ == "__main__":
+    args = args_parser()
+    main(args,ARGS)
+    print("finish : %s for game:%s" % (str(args), args.game))
+        
+
