@@ -334,10 +334,10 @@ class ReplayResetEnv(gym.Wrapper):
 
     # when reset is None we perform default reset
     # when reset is int we reset to specific point 
-    def reset(self,reset_point=None):
+    def reset(self,reset_point=None,start_point=None):
         obs = self.env.reset()
 
-        if reset_point == None:
+        if reset_point == None or start_point == None:
             self.cur_demo_idx = 0
             self.action_nr = -1
             self.score = 0
@@ -350,12 +350,36 @@ class ReplayResetEnv(gym.Wrapper):
                 obs, _, _, _ = self.env.step(0)
             return obs
         
-        elif reset_point > 0 and reset_point < self.demo.length:
-            self.actions_to_overwrite = self.demo.actions[:reset_point]
+        elif reset_point > 0 and reset_point < self.demo.length: 
             # action before reset point need to be perform
+            self.start_point = start_point
             self.action_nr = 0
             self.score = self.demo.returns[reset_point]
-            
+            self.actions_to_overwrite = self.demo.actions[:reset_point]
+            for nr,ob in zip(self.demo.action_nr[::-1],self.demo.obs[::-1]):
+                if nr <= self.start_point:
+                    start_nr = nr
+                    start_ob = ob
+                    break
+                if start_nr > 0:
+                    self.env.unwrapped.restore_state(start_ob)
+                start_nr_lstm = np.maximum(self.start_point,start_nr)
+                if start_nr_lstm > start_nr:
+                    for a in self.demo.actions[start_nr:start_nr_lstm]:
+                        action = self.env.unwrapped._action_set[a]
+                        self.env.wrapped.ale.act(action)
+                self.actions_to_overwrite = self.demo.actions[start_nr_lstm:self.start_point]
+                if start_nr_lstm > 0:
+                    obs = self.env.unwrapped._get_image()
+                self.action_nr = start_nr_lstm
+                self.score = self.demo.returns[start_nr_lstm]
+                if self.start_point == 0 and self.actions_to_overwrite == []:
+                    noops = random.randint(0, 30)
+                    for _ in range(noops):
+                        obs, _, _, _ = self.env.step(0)
+            return obs
+                
+
     def move_start_point(self,delta):
         self.start_point = int(np.maximum(self.start_point-delta,0))
 

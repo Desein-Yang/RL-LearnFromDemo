@@ -31,7 +31,7 @@ class CNNModel(nn.Module):
             # Orthogonal initialization and layer scaling
             # Paper name : Implementation Matters in Deep Policy Gradient: A case study on PPO and TRPO
             if isinstance(m,(nn.Linear,nn.Conv2d)):
-                nn.init.orthogonal_(m.weight)
+                nn.init.uniform_(m.weight)
                 if m.bias is not None:
                     m.bias.data.zero_()
 
@@ -80,7 +80,8 @@ class MLPModel(nn.Module):
             # Orthogonal initialization and layer scaling
             # Paper name : Implementation Matters in Deep Policy Gradient: A case study on PPO and TRPO
             if isinstance(m,(nn.Linear,nn.Conv2d)):
-                nn.init.orthogonal_(m.weight)
+                #nn.init.orthogonal_(m.weight)
+                nn.init.uniform_(m.weight)
                 if m.bias is not None:
                     m.bias.data.zero_()
 

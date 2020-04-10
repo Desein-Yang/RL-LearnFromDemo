@@ -29,7 +29,7 @@ class Demo:
             self.returns = [0]
             self.obs = None
             self.lives = None
-            self.checkpoint_action_nr = None
+            self.action_nr = None
             self.length = 0
         else:
             with open(demo_file_name, "rb") as f:
@@ -41,7 +41,7 @@ class Demo:
                 assert len(self.rewards) == len(self.actions)
                 self.lives = dat['lives']
                 self.obs = dat['checkpoints']
-                self.checkpoint_action_nr = dat['checkpoint_action_nr']
+                self.action_nr = dat['checkpoint_action_nr']
 
     def replay(self,i):
         """return action, ob, reward, done, info in demo.  

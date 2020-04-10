@@ -20,5 +20,6 @@ Demo (dict)
 
 ## Update log
 1. 写好了replay demo 和reset env相关的类
+2. agent 已测试
 
 ## Reference

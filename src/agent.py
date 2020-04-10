@@ -29,7 +29,7 @@ class Worker(object):
         self.eps = ARGS.epsilon
 
     def act(self,ob):
-        ob = torch.from_numpy(ob) # ob is a numpy array
+        ob = torch.tensor(torch.from_numpy(ob),dtype=torch.float32).clone().deatch() # ob is a numpy array
         action_prob = self.actor_model(ob)
         dist = Categorical(action_prob)
         # dist = Normal(action_prob)
@@ -70,7 +70,7 @@ class Worker(object):
 
         reset_point = self.reset_point
         start_point = np.random.uniform(reset_point - d,reset_point) # start = tao * reset = tao
-        self.env.reset_to_state(reset_point)
+        self.env.reset(reset_point,start_point)
         i = start_point - K
 
         for step in range(L):
@@ -90,7 +90,7 @@ class Worker(object):
                     W = W + 1
                 start_point = np.random.uniform(reset_point-d,reset_point)
                 i = start_point - K
-                self.env.reset_to_state(reset_point)      
+                self.env.reset(reset_point,start_point)      
         
         return D,W
 
@@ -192,3 +192,4 @@ class PPO_Optimizer(object):
             'Ent loss' : ent_losses,
         }
         return lossdict, self.actor.state_dict(), self.critic.state_dict()
+

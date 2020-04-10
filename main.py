@@ -30,6 +30,8 @@ class ARGS:
     allowed_lag = 50
     allowed_score_deficit = 0
     max_grad_norm = 1
+    weight_vf = 0.5
+    weight_entropy = 1e-4
 
     @classmethod
     def set_params(cls,kwargs):
